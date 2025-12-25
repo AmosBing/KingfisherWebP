@@ -1,5 +1,7 @@
 # KingfisherWebP
 
+对webp图在滚动列表中做了性能优化，降低了cpu和内存，滑动更流畅
+
 [![CI Status](https://github.com/Yeatse/KingfisherWebP/workflows/unittest/badge.svg)](https://travis-ci.org/Yeatse/KingfisherWebP)
 [![Version](https://img.shields.io/cocoapods/v/KingfisherWebP.svg?style=flat)](http://cocoapods.org/pods/KingfisherWebP)
 [![License](https://img.shields.io/cocoapods/l/KingfisherWebP.svg?style=flat)](http://cocoapods.org/pods/KingfisherWebP)
