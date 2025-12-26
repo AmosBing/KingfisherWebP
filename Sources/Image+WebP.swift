@@ -10,6 +10,7 @@ import Kingfisher
 import CoreGraphics
 import Foundation
 import Accelerate
+import CommonCrypto
 
 #if SWIFT_PACKAGE
 import KingfisherWebP_ObjC
@@ -104,6 +105,7 @@ class WebPFrameSource: ImageFrameSource {
         guard let decoder = WebPDecoderCreateWithData(data as CFData) else {
             return nil
         }
+        self.imageKey = data.md5Hash()
         self.data = data
         self.decoder = decoder
         // http://www.russbishop.net/the-law
@@ -119,7 +121,9 @@ class WebPFrameSource: ImageFrameSource {
     let data: Data?
     private let decoder: WebPDecoderRef
     private var decoderLock: UnsafeMutablePointer<os_unfair_lock>
-    private var frameCache = NSCache<NSNumber, CGImage>()
+    private var frameCache = WebpImagesCache.shared.frameCache
+    
+    private let imageKey: String?
     
     var frameCount: Int {
         get {
@@ -132,20 +136,40 @@ class WebPFrameSource: ImageFrameSource {
         defer {
             os_unfair_lock_unlock(decoderLock)
         }
-        var image = frameCache.object(forKey: index as NSNumber)
+        let frameKey = imageKey!.appending("@\(index)")
+        
+        var image = frameCache.object(forKey: frameKey as NSString)
         if image == nil {
+            
+            print("kf绘制图片--webp解码：\(frameKey)")
             image = WebPDecoderCopyImageAtIndex(decoder, Int32(index))
-            if image != nil {
-                frameCache.setObject(image!, forKey: index as NSNumber)
-            }
-        }
-        guard let image = image else { return nil }
-        if let maxSize = maxSize, maxSize != .zero, (CGFloat(image.width) > maxSize.width || CGFloat(image.height) > maxSize.height) {
-            // Scale down image to fit maxSize while preserving aspect ratio
-            // Try vImage first for better performance, fallback to CGContext if fails
-            if let scaledImage = scaleImageUsingVImage(image, maxSize: maxSize) ?? scaleImageUsingContext(image, maxSize: maxSize) {
-                return scaledImage
-            }
+//            if image != nil {
+//                frameCache.setObject(image!, forKey: frameKey as NSString)
+//            }
+            
+            guard let image = image else { return nil }
+            
+            let scale = 1.0
+            let destWidth = Int(CGFloat(image.width) * scale)
+            let destHeight = Int(CGFloat(image.height) * scale)
+            let context = CGContext(data: nil,
+                                    width: destWidth,
+                                    height: destHeight,
+                                    bitsPerComponent: image.bitsPerComponent,
+                                    bytesPerRow: 0,
+                                    space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: image.bitmapInfo.rawValue)
+            context?.interpolationQuality = .high
+            context?.draw(image, in: CGRect(x: 0, y: 0, width: destWidth, height: destHeight))
+            
+            print("kf绘制图片--：\(frameKey)")
+            
+            let nImage = context?.makeImage() ?? image
+            
+            frameCache.setObject(nImage, forKey: frameKey as NSString)
+            
+            return image
+        
         }
         return image
     }
@@ -295,5 +319,28 @@ extension Data {
         let webpString = String(data: webpHeader, encoding: .ascii)
 
         return riffString == "RIFF" && webpString == "WEBP"
+    }
+    
+    // MARK: - 常用哈希算法
+    /// 获取 MD5 哈希值（小写十六进制字符串）
+    func md5Hash() -> String {
+        let digestLength = Int(CC_MD5_DIGEST_LENGTH)
+        let hashBytes = UnsafeMutablePointer<UInt8>.allocate(capacity: digestLength)
+        defer {
+            hashBytes.deallocate() // 确保内存释放
+        }
+        
+        // 根据算法更新哈希值
+        let dataBytes = self.withUnsafeBytes { $0.baseAddress }
+        let dataLength = CC_LONG(self.count)
+        
+        CC_MD5(dataBytes, dataLength, hashBytes)
+        
+        // 将哈希字节转换为十六进制字符串
+        var hashString = ""
+        for i in 0..<digestLength {
+            hashString += String(format: "%02x", hashBytes[i])
+        }
+        return hashString
     }
 }
